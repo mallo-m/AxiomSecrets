@@ -1,7 +1,7 @@
 include mk/core.mk
 
 CXX = x86_64-w64-mingw32-g++-win32
-LIBS = 
+LIBS = -lshlwapi
 LIBSFOLDERS = -L/usr/lib/x86_64-linux-gnu/ -L./libraries
 vpath %.cpp $(dir MAKEFILE_LIST)
 CFLAGS = -Wall -Wextra -Wno-unused-result -Wno-unused-parameter -Wno-unused-function -Wno-ignored-qualifiers -Wno-multichar -Wno-return-type -I./includes

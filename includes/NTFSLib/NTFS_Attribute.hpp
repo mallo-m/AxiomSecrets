@@ -325,9 +325,6 @@ BOOL CAttrNonResident::PickData(const BYTE** dataRun, LONGLONG* length, LONGLONG
 // Travers DataRun and insert into a link list
 BOOL CAttrNonResident::ParseDataRun()
 {
-	printf("Parsing Non Resident DataRun\n");
-	printf("Start VCN = %I64llu, End VCN = %I64llu\n", AttrHeaderNR->StartVCN, AttrHeaderNR->LastVCN);
-
 	const BYTE* dataRun = (BYTE*)AttrHeaderNR + AttrHeaderNR->DataRunOffset;
 	LONGLONG length;
 	LONGLONG LCNOffset;
@@ -339,14 +336,9 @@ BOOL CAttrNonResident::ParseDataRun()
 		if (PickData(&dataRun, &length, &LCNOffset))
 		{
 			LCN += LCNOffset;
-			if (LCN < 0)
-			{
-				NTFS_TRACE("DataRun decode error 2\n");
+			if (LCN < 0) {
 				return FALSE;
 			}
-
-			printf("Data length = %I64lld clusters, LCN = %I64lld", length, LCN);
-			printf(LCNOffset == 0 ? ", Sparse Data\n" : "\n");
 
 			// Store LCN, Data size (clusters) into list
 			DataRun_Entry* dr = new DataRun_Entry;
@@ -362,8 +354,6 @@ BOOL CAttrNonResident::ParseDataRun()
 			}
 			else
 			{
-				NTFS_TRACE("DataRun decode error: VCN exceeds bound\n");
-
 				// Remove entries
 				DataRunList.RemoveAll();
 
@@ -383,11 +373,8 @@ BOOL CAttrNonResident::ReadClusters(void* buf, DWORD clusters, LONGLONG lcn)
 {
 	if (lcn == -1)	// sparse data
 	{
-		printf("Sparse Data, Fill the buffer with 0\n");
-
 		// Fill the buffer with 0
 		memset(buf, 0, clusters * _ClusterSize);
-
 		return TRUE;
 	}
 
@@ -399,7 +386,6 @@ BOOL CAttrNonResident::ReadClusters(void* buf, DWORD clusters, LONGLONG lcn)
 
 	if (len == (DWORD)-1 && GetLastError() != NO_ERROR)
 	{
-		printf("Cannot locate cluster with LCN %I64lld\n", lcn);
 	}
 	else
 	{
@@ -408,10 +394,6 @@ BOOL CAttrNonResident::ReadClusters(void* buf, DWORD clusters, LONGLONG lcn)
 		{
 			//printf("Successfully read %u clusters from LCN %I64d\n", clusters, lcn);
 			return TRUE;
-		}
-		else
-		{
-			printf("Cannot read cluster with LCN %I64lld\n", lcn);
 		}
 	}
 
@@ -432,16 +414,12 @@ BOOL CAttrNonResident::ReadVirtualClusters(ULONGLONG vcn, DWORD clusters, void* 
 	BYTE* buf = (BYTE*)bufv;
 
 	// Verify if clusters exceeds DataRun bounds
-	if (vcn + clusters > (AttrHeaderNR->LastVCN - AttrHeaderNR->StartVCN + 1))
-	{
-		printf("Cluster exceeds DataRun bounds: %lld - %lld\n", vcn + clusters, (AttrHeaderNR->LastVCN - AttrHeaderNR->StartVCN + 1));
+	if (vcn + clusters > (AttrHeaderNR->LastVCN - AttrHeaderNR->StartVCN + 1)) {
 		return FALSE;
 	}
 
 	// Verify buffer size
-	if (bufLen < clusters * _ClusterSize)
-	{
-		printf("Buffer size too small\n");
+	if (bufLen < clusters * _ClusterSize) {
 		return FALSE;
 	}
 
@@ -539,7 +517,6 @@ BOOL CAttrNonResident::ReadData(const ULONGLONG& offset, void* bufv, DWORD bufLe
 			startVCN++;
 		}
 		else {
-			printf("ERR_1\n");
 			return FALSE;
 		}
 	}
@@ -563,7 +540,6 @@ BOOL CAttrNonResident::ReadData(const ULONGLONG& offset, void* bufv, DWORD bufLe
 				return TRUE;
 		}
 		else {
-			printf("ERR_2\n");
 			return FALSE;
 		}
 	}
@@ -578,7 +554,6 @@ BOOL CAttrNonResident::ReadData(const ULONGLONG& offset, void* bufv, DWORD bufLe
 		return TRUE;
 	}
 	else {
-		printf("ERR_3\n");
 		return FALSE;
 	}
 }
