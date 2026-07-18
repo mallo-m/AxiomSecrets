@@ -9,4 +9,8 @@ CompileFlags:
     - "-I./../sys-includes"
     - "-I./../../sys-includes"
     - "-I./../../../sys-includes"
+    - "-I./libfsntfs/include"
+    - "-I.././libfsntfs/include"
+    - "-I../.././libfsntfs/include"
+    - "-I../../.././libfsntfs/include"
 

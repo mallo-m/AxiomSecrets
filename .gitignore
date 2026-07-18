@@ -1,4 +1,6 @@
 AxiomSecrets.exe
+unxor
+!enxor/
 .o
 .o/*
 *.swp

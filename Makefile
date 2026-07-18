@@ -1,19 +1,23 @@
 include mk/core.mk
 
 CXX = x86_64-w64-mingw32-g++-win32
-LIBS = -lshlwapi
-LIBSFOLDERS = -L/usr/lib/x86_64-linux-gnu/ -L./libraries
+LIBS = -lshlwapi -lfsntfs
+LIBSFOLDERS = -L/usr/lib/x86_64-linux-gnu/ -L./libraries -L./libfsntfs/libfsntfs/.libs
 vpath %.cpp $(dir MAKEFILE_LIST)
-CFLAGS = -Wall -Wextra -Wno-unused-result -Wno-unused-parameter -Wno-unused-function -Wno-ignored-qualifiers -Wno-multichar -Wno-return-type -I./includes
+CFLAGS = -Wall -Wextra -Wno-unused-result -Wno-unused-parameter -Wno-unused-function -Wno-ignored-qualifiers -Wno-multichar -Wno-return-type -I./includes -I./libfsntfs/include
 CPPFLAGS += -MMD -MP
 OBJDIR = .o
 UNAME = $(shell uname)
-NAME = AxiomSecrets
+NAME = AxiomSecrets.exe
+UNXOR = unxor
 
 OBJS = $(subst .cpp,.o,$(subst ./src/,./$(OBJDIR)/,$(SRCS)))
 DEPS = $(subst .cpp,.d,$(subst ./src/,./$(OBJDIR)/,$(SRCS)))
 
-all: $(NAME)
+all: $(NAME) $(UNXOR)
+
+$(UNXOR): src/unxor/unxor.c
+	@$(CC) src/unxor/unxor.c -o $(UNXOR)
 
 $(NAME): $(OBJS)
 	@$(RM) tmp_log
@@ -24,7 +28,7 @@ $(NAME): $(OBJS)
 		$(CXX) -s -static $(OBJS) -o $(NAME) $(LIBSFOLDERS) $(LIBS) && \
 			printf "\033[1;36m\n[COMPILATION SUCCESSFUL]\033[0m\n" || \
 			printf "\033[1;31m\n[COMPILATION FAILED]\033[0m\n"; \
-		chown 1000:users $(NAME).exe >/dev/null 2>&1; \
+		chown 1000:users $(NAME) >/dev/null 2>&1; \
 	fi;
 	@$(RM) files_missing
 	@$(RM) /tmp/.makefile_link
@@ -53,7 +57,7 @@ clean:
 fclean:
 	@$(RM) $(OBJS) $(DEPS)
 	@printf "\033[1;33m[OBJECT FILES CLEANED]\033[0m\n"
-	@$(RM) $(NAME)
+	@$(RM) $(NAME) $(UNXOR)
 	@printf "\033[1;35m[BINARY DELETED]\033[0m\n"
 
 re: fclean all

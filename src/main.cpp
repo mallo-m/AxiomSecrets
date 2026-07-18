@@ -1,117 +1,122 @@
-#include <fstream>
-#include <shlwapi.h>
 #include "AxiomSecrets.h"
-#include "NTFSLib/NTFS.hpp"
-#include "errhandlingapi.h"
-#include "handleapi.h"
 
-static CNTFSVolume NTFS_OpenDisk(wchar_t letter)
+static libfsntfs_volume_t *NTFS_OpenDisk(wchar_t letter)
 {
-    CNTFSVolume volume(letter);
+	int retval;
+	libcerror_error_t *error = 0;
+	libfsntfs_volume_t *volume;
 
-    if (!volume.IsVolumeOK())
-    {
-        printf("[!] Not a valid volume name\n");
-        exit(1);
-    }
-    printf("[+] Volume opened\n");
-    return (volume);
+	volume = (libfsntfs_volume_t *)malloc(sizeof(libfsntfs_volume_t));
+	memset(&volume, 0, sizeof(libfsntfs_volume_t));
+	libfsntfs_volume_initialize(&volume, &error);
+	retval = libfsntfs_volume_open(
+		volume,
+		"\\\\.\\C:",
+		LIBFSNTFS_OPEN_READ,
+		&error
+	);
+
+	if (retval != 1)
+	{
+		printf("[!] Failed to open %c: volume\n", letter);
+		exit(1);
+	}
+	printf("[+] Volume %c: opened\n", letter);
+	return (volume);
 }
 
-static CFileRecord NTFS_ParseRoot(CNTFSVolume *volume)
+static libfsntfs_file_entry_t *NTFS_ParseRoot(libfsntfs_volume_t *volume)
 {
-    CFileRecord fr(volume);
-    fr.SetAttrMask(MASK_INDEX_ROOT | MASK_INDEX_ALLOCATION);
-    if (!fr.ParseFileRecord(MFT_IDX_ROOT))
-    {
-        printf("Cannot read root directory of volume\n");
-        exit(1);
-    }
-    printf("[+] Root directory parsed\n");
+	int retval;
+	libcerror_error_t *error = 0;
+	libfsntfs_file_entry_t *root;
 
-    if (!fr.ParseAttrs())
-    {
-        printf("[!] Cannot parse attributes\n");
-        exit(1);
-    }
-    return (fr);
+	root = (libfsntfs_file_entry_t *)malloc(sizeof(libfsntfs_file_entry_t));
+	memset(&root, 0, sizeof(libfsntfs_file_entry_t));
+	retval = libfsntfs_volume_get_root_directory(
+		volume,
+		&root,
+		&error
+	);
+
+	if (retval != 1)
+	{
+		printf("[!] Failed to parse root directory of volume\n");
+		exit(1);
+	}
+	printf("[+] Root volume parsed\n");
+	return (root);
 }
 
-static int NTFS_TraverseDirectories(CFileRecord *fr, CIndexEntry *ie, const char **targets)
+static libfsntfs_file_entry_t *NTFS_TraverseDirectories(libfsntfs_file_entry_t *root, const char **targets, size_t *filei)
 {
 	size_t i;
+	int retval;
+	libfsntfs_file_entry_t *result;
+	libfsntfs_file_entry_t *current;
+	libfsntfs_error_t *error;
 
 	if (targets == NULL)
 		return (0);
 
 	i = 1;
+	result = NULL;
+	current = root;
 	while (1)
 	{
 		if (targets[i] != NULL && targets[i + 1] == NULL)
 			break;
-		if (fr->FindSubEntry(targets[i], *ie))
-		{
-			printf("[+] Subdirectory %s found\n", targets[i]);
-			if (!fr->ParseFileRecord(ie->GetFileReference()))
-			{
-				printf("[!] Cannot read root directory of volume\n");
-				exit(1);
-			}
 
-			if (!fr->ParseAttrs())
-			{
-				if (fr->IsCompressed())
-				    printf("[!] Compressed directory not supported yet\n");
-				else if (fr->IsEncrypted())
-				    printf("[!] Encrypted directory not supported yet\n");
-				else
-				    printf("[!] Cannot parse directory attributes\n");
-				exit(1);
-			}
-		}
-		else
+		result = (libfsntfs_file_entry_t *)malloc(sizeof(libfsntfs_file_entry_t));
+		memset(&result, 0, sizeof(libfsntfs_file_entry_t));
+		retval = libfsntfs_file_entry_get_sub_file_entry_by_utf8_name(
+			current,
+			(const unsigned char *)targets[i],
+			strlen(targets[i]),
+			&result,
+			&error
+		);
+
+		if (retval == 1)
 		{
-			printf("[!] Sub-directory %s not found\n", targets[i]);
-			exit(1);
+			printf("[+] Subentry %s found\n", targets[i]);
+			retval = libfsntfs_file_entry_has_directory_entries_index(
+				result,
+				&error
+			);
+			if (retval == 0)
+			{
+				printf("[!] Error: the path specified a subdirectory of name %s, but it is not detected as one. Skipping this path\n", targets[i]);
+				return (NULL);
+			}
+			current = result;
+		}
+		else {
+			printf("[!] Subdirectory %s not found\n", targets[i]);
+			return (NULL);
 		}
 		i++;
 	}
 	printf("[+] All subdirectories have been traversed\n");
-	return (i);
+	*filei = i;
+	return (result);
 }
 
-static void NTFS_CopyFile(const char *filename, const char *savedir, CFileRecord *fr, CIndexEntry *ie)
+static void NTFS_CopyFile(libfsntfs_file_entry_t *parent_directory, const char *filename, const char *savedir)
 {
 	HANDLE hFile;
 	char filepath[MAX_PATH + 1];
+	libfsntfs_file_entry_t *file;
+	libfsntfs_error_t *error;
+	BYTE filebuf[16 * 1024];
+	size_t readbytes;
 
-	if (fr->FindSubEntry(filename, *ie))
+	file = (libfsntfs_file_entry_t *)malloc(sizeof(libfsntfs_file_entry_t));
+	memset(&file, 0, sizeof(libfsntfs_file_entry_t));
+	if (libfsntfs_file_entry_get_sub_file_entry_by_utf8_name(parent_directory, (const unsigned char *)filename, strlen(filename), &file, &error) == 1)
 	{
-		if (!fr->ParseFileRecord(ie->GetFileReference()))
-		{
-			printf("[!] Cannot read file: %s\n", filename);
-			return;
-		}
-		printf("[+] File %s opened\n", filename);
-
-		// Validate source file can be extracted
-		fr->SetAttrMask(MASK_DATA);
-		if (!fr->ParseAttrs())
-		{
-			if (fr->IsCompressed())
-				printf("[!] Compressed file not supported yet\n");
-			else if (fr->IsEncrypted())
-				printf("[!] Encrypted file not supported yet\n");
-			else if (fr->IsDirectory())
-				printf("[!] Can not create backup of file %s: source is a directory\n", filename);
-			else
-				printf("[!] Cannot parse file attributes\n");
-			return;
-		}
-		printf("[+] Attributes set for %s\n", filename);
-
 		// Open a WRITE-TRUNCATE handle to destination file
-		snprintf(filepath, sizeof(filepath), "%s\\%s.bak", savedir, filename);
+		snprintf(filepath, sizeof(filepath), "%s\\%s.rdx", savedir, filename);
 		hFile = CreateFileA(
 			filepath,
 			FILE_GENERIC_READ | FILE_GENERIC_WRITE,
@@ -135,61 +140,48 @@ static void NTFS_CopyFile(const char *filename, const char *savedir, CFileRecord
 			return;
 		}
 
-		const CAttrBase* data = fr->FindStream();
-		if (data)
+		// Loop through all data chunks, 16KB at a time
+		while (1)
 		{
-			std::ofstream _file;
-			DWORD datalen;
-			DWORD readLen;
-			DWORD totalReadLen;
-			size_t readSize;
-			BYTE filebuf[16 * 1024];
-
-			readLen = 0;
-			totalReadLen = 0;
-			datalen = (DWORD)data->GetDataSize();
-			printf("[+] %s size: %ld\n", filename, datalen);
-			while (totalReadLen < datalen)
-			{
-				readSize = datalen - totalReadLen;
-				if (datalen - readLen > sizeof(filebuf))
-					readSize = sizeof(filebuf);
-				if (data->ReadData(totalReadLen, filebuf, readSize, &readLen))
-				{
-					WriteFile(
-						hFile,
-						filebuf,
-						readLen,
-						NULL,
-						NULL
-					);
-					totalReadLen += readLen;
-				}
-				else
-				{
-					printf("[!] Read data error for: %s\n", filename);
-					CloseHandle(hFile);
-					return;
-				}
+			readbytes = libfsntfs_file_entry_read_buffer(
+				file,
+				filebuf,
+				sizeof(filebuf),
+				&error
+			);
+			for (size_t buf_i = 0; buf_i < 16 * 1024; buf_i++)
+				filebuf[buf_i] ^= 0x42;
+			WriteFile(
+				hFile,
+				filebuf,
+				readbytes,
+				NULL,
+				NULL
+			);
+			if (readbytes <= 0) {
+				break;
 			}
-			CloseHandle(hFile);
-			printf("[+] File %s backed up\n", filename);
 		}
+
+		CloseHandle(hFile);
 	}
 	else {
-		printf("[!] File %s not found\n", filename);
+		printf("[!] Target file not found\n");
 	}
 }
 
 int main(int argc, char **argv)
 {
+	int i;
 	int argi;
-	int filei;
-	size_t i = 0;
+	size_t filei;
 	wchar_t volumeLetter;
 	const char **targets;
-	const char *savedir;
-
+	libfsntfs_volume_t *volume;
+	libfsntfs_file_entry_t *root;
+	libfsntfs_file_entry_t *tmp;
+	libcerror_error_t *error = 0;
+	
 	// Check that invocation matches usage
 	if (argc < 3)
 	{
@@ -226,9 +218,9 @@ int main(int argc, char **argv)
 		return (1);
 	}
 
+
 	// Process each file passed as argument and save it into argv[argc - 1] folder
 	argi = 1;
-	savedir = argv[argc - 1];
 	while (argi < argc - 1)
 	{
 		// Validate path: path is absolute and first letter is a valid volume name
@@ -238,20 +230,25 @@ int main(int argc, char **argv)
 			argi++;
 			continue;
 		}
+		printf("[+] Processing file %s\n", argv[argi]);
 
 		targets = UTILS_strsplit(argv[argi], '\\');
 		mbtowc(&volumeLetter, targets[0], 1);
-		CIndexEntry ie;
-		CNTFSVolume volume = NTFS_OpenDisk(volumeLetter);
-		CFileRecord fr = NTFS_ParseRoot(&volume);
-		filei = NTFS_TraverseDirectories(&fr, &ie, targets);
-		NTFS_CopyFile(targets[filei], savedir, &fr, &ie);
+		volume = NTFS_OpenDisk(volumeLetter);
+		root = NTFS_ParseRoot(volume);
+		tmp = NTFS_TraverseDirectories(root, targets, &filei);
+		if (tmp != NULL) {
+			printf("[+] Copying file %s\n", targets[filei]);
+			NTFS_CopyFile(tmp, targets[filei], argv[argc - 1]);
+		}
+		i = 0;
 		while (targets && targets[i] != NULL)
 		{
 			free((void*)targets[i]);
 			i++;
 		}
 		free(targets);
+		libfsntfs_volume_close(volume, &error);
 		argi++;
 	}
 	return (0);

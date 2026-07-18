@@ -1,0 +1,3 @@
+[submodule "libfsntfs"]
+	path = libfsntfs
+	url = https://github.com/libyal/libfsntfs.git
